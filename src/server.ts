@@ -4,6 +4,10 @@ import dotenv from "dotenv";
 import { getInstallationOctokit } from "./github/app";
 import type { WebhookEventMap } from "@octokit/webhooks-types";
 import { upsertBridgePRComment } from "./github/prComment";
+import { getPRFiles } from "./analyzer/prDiff";
+import { isBackendFile } from "./analyzer/isBackendFile";
+import { parseDiff } from "./analyzer/parseDiff";
+import { detectNullableFieldChange } from "./analyzer/breakingChange";
 
 dotenv.config();
 
@@ -53,19 +57,31 @@ webhooks.on("pull_request", async (event) => {
 
   const owner = payload.repository.owner.login;
   const repo = payload.repository.name;
-  const issue_number = payload.pull_request.number;
+  const pull_number = payload.pull_request.number;
 
   if (!["opened", "synchronize"].includes(payload.action)) return;
 
-await upsertBridgePRComment({
+
+  console.log("✅ Comment posted on PR");
+
+  const files = await getPRFiles(octokit, owner, repo, pull_number);
+
+  for (const file of files) {
+    if (!isBackendFile(file.filename)) continue;
+    const { added, removed } = parseDiff(file.patch);
+    const breakingChange = detectNullableFieldChange(removed, added);
+    if (breakingChange) {
+        console.log(`Backend response changed: ${breakingChange.field} → ${breakingChange.type}`);
+    }
+  }
+  await upsertBridgePRComment({
   octokit,
   owner,
   repo,
-  issue_number,
+  issue_number:pull_number,
   body: "👋 BridgePR is connected",
-});
+ });
 
-  console.log("✅ Comment posted on PR");
 });
 
 
