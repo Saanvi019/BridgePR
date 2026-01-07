@@ -4,8 +4,8 @@
 
 export function isBackendFile(filePath: string): boolean {
   return (
-    filePath.startsWith("api/") ||
-    filePath.startsWith("routes/") ||
-    filePath.startsWith("controllers/")
+    filePath.includes("/controllers/") ||
+    filePath.includes("/routes/") ||
+    filePath.includes("/api/")
   );
 }

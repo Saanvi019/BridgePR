@@ -8,7 +8,7 @@ import { getPRFiles } from "./analyzer/prDiff";
 import { isBackendFile } from "./analyzer/isBackendFile";
 import { parseDiff } from "./analyzer/parseDiff";
 import { detectNullableFieldChange } from "./analyzer/breakingChange";
-
+import {  hasBackendResponse  } from "./analyzer/responseExtractors";
 dotenv.config();
 
 const app = express();
@@ -66,14 +66,21 @@ webhooks.on("pull_request", async (event) => {
 
   const files = await getPRFiles(octokit, owner, repo, pull_number);
 
-  for (const file of files) {
-    if (!isBackendFile(file.filename)) continue;
-    const { added, removed } = parseDiff(file.patch);
-    const breakingChange = detectNullableFieldChange(removed, added);
-    if (breakingChange) {
-        console.log(`Backend response changed: ${breakingChange.field} → ${breakingChange.type}`);
-    }
+ for (const file of files) {
+  if (!isBackendFile(file.filename)) continue;
+
+  if (!hasBackendResponse(file.patch)) continue;
+
+  const { added, removed } = parseDiff(file.patch);
+
+  const breakingChange = detectNullableFieldChange(removed, added);
+
+  if (breakingChange) {
+    console.log(
+      `Backend response changed: ${breakingChange.field} → ${breakingChange.type}`
+    );
   }
+}
   await upsertBridgePRComment({
   octokit,
   owner,
