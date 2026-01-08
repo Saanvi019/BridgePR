@@ -9,6 +9,13 @@ import { isBackendFile } from "./analyzer/isBackendFile";
 import { parseDiff } from "./analyzer/parseDiff";
 import { detectNullableFieldChange } from "./analyzer/breakingChange";
 import {  hasBackendResponse  } from "./analyzer/responseExtractors";
+import { isFrontendFile } from "./analyzer/isFrontendFile";
+import { isFieldUsedInFrontend } from "./analyzer/frontendUsage";
+import { isLikelyConsumed } from "./analyzer/frontendConsumption";
+import { walkRepo } from "./analyzer/repoFrontendScan";
+
+
+
 dotenv.config();
 
 const app = express();
@@ -65,29 +72,125 @@ webhooks.on("pull_request", async (event) => {
   console.log("✅ Comment posted on PR");
 
   const files = await getPRFiles(octokit, owner, repo, pull_number);
+  let detectedBreakingChange: {
+  field: string;
+  type: string;
+} | null = null;
 
+  let frontendUsageFound = false;
+
+ //detection
  for (const file of files) {
   if (!isBackendFile(file.filename)) continue;
-
   if (!hasBackendResponse(file.patch)) continue;
 
   const { added, removed } = parseDiff(file.patch);
-
   const breakingChange = detectNullableFieldChange(removed, added);
 
-  if (breakingChange) {
+  if (breakingChange && !detectedBreakingChange) {
+    detectedBreakingChange = breakingChange;
+
     console.log(
-      `Backend response changed: ${breakingChange.field} → ${breakingChange.type}`
-    );
+    `Backend response changed: ${breakingChange.field} → ${breakingChange.type}`
+  );
+  await upsertBridgePRComment({
+    octokit,
+    owner,
+    repo,
+    issue_number: pull_number,
+    body: "⏳ **BridgePR is analyzing potential frontend impact…**",
+  });
   }
 }
+ 
+if (detectedBreakingChange) {
+  for (const f of files) {
+    if (!isFrontendFile(f.filename)) continue;
+
+    if (isLikelyConsumed(f.patch, detectedBreakingChange.field)) {
+      frontendUsageFound = true;
+      break;
+    }
+  }
+
+  
+}
+
+let repoWideUsageFound = false;
+
+if (detectedBreakingChange && !frontendUsageFound) {
+  console.log("🔍 No frontend usage in PR, scanning repo...");
+
+  const allRepoFiles = await walkRepo(octokit, owner, repo);
+
+  for (const filePath of allRepoFiles) {
+    if (!isFrontendFile(filePath)) continue;
+
+    const { data } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: filePath,
+    });
+
+    if (!("content" in data)) continue;
+
+    const content = Buffer.from(
+      data.content,
+      "base64"
+    ).toString("utf-8");
+
+    if (isLikelyConsumed(content, detectedBreakingChange.field)) {
+      repoWideUsageFound = true;
+      console.log(
+        `⚠️ Frontend usage found in repo file: ${filePath}`
+      );
+      break;
+    }
+  }
+}
+
+
+let commentBody: string;
+
+if (detectedBreakingChange) {
+  if (frontendUsageFound || repoWideUsageFound) {
+    commentBody = [
+    `⚠️ **Potential frontend impact detected**`,
+    ``,
+    `- Backend field \`${detectedBreakingChange.field}\` was made **${detectedBreakingChange.type}**`,
+    
+     `- This field is consumed in frontend files`
+      
+  ].join("\n");
+}else{
+  commentBody = [
+    `ℹ️ **Backend change detected**`,
+    ``,
+    `- Backend field \`${detectedBreakingChange.field}\` was made **${detectedBreakingChange.type}**`,
+    `- Safe to change, no frontend impact detected.`,
+  ].join("\n");
+}
+if (frontendUsageFound || repoWideUsageFound) {
+    console.log(
+      `⚠️ Frontend may break: '${detectedBreakingChange.field}' is consumed in frontend files`
+    );
+  } else {
+    console.log(
+      `ℹ️ Backend field '${detectedBreakingChange.field}' changed, no frontend usage detected`
+    );
+  }
+
   await upsertBridgePRComment({
-  octokit,
-  owner,
-  repo,
-  issue_number:pull_number,
-  body: "👋 BridgePR is connected",
- });
+    octokit,
+    owner,
+    repo,
+    issue_number: pull_number,
+    body: commentBody,
+  });
+  console.log("✅ Comment posted on PR");
+}
+
+
 
 });
 
