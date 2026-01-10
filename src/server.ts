@@ -117,6 +117,7 @@ if (detectedBreakingChange) {
 }
 
 let repoWideUsageFound = false;
+let repoUsageFile: string | null = null;
 
 if (detectedBreakingChange && !frontendUsageFound) {
   console.log("🔍 No frontend usage in PR, scanning repo...");
@@ -141,6 +142,7 @@ if (detectedBreakingChange && !frontendUsageFound) {
 
     if (isLikelyConsumed(content, detectedBreakingChange.field)) {
       repoWideUsageFound = true;
+      repoUsageFile = filePath;
       console.log(
         `⚠️ Frontend usage found in repo file: ${filePath}`
       );
@@ -155,13 +157,16 @@ let commentBody: string;
 if (detectedBreakingChange) {
   if (frontendUsageFound || repoWideUsageFound) {
     commentBody = [
-    `⚠️ **Potential frontend impact detected**`,
-    ``,
-    `- Backend field \`${detectedBreakingChange.field}\` was made **${detectedBreakingChange.type}**`,
-    
-     `- This field is consumed in frontend files`
-      
-  ].join("\n");
+  `⚠️ **Potential frontend impact detected**`,
+  ``,
+  `- Backend field \`${detectedBreakingChange.field}\` was made **${detectedBreakingChange.type}**`,
+  frontendUsageFound
+    ? `- This field is consumed in frontend code in this PR`
+    : repoUsageFile
+      ? `- This field is consumed in \`${repoUsageFile}\``
+      : `- This field is consumed in frontend code`,
+].join("\n");
+
 }else{
   commentBody = [
     `ℹ️ **Backend change detected**`,
