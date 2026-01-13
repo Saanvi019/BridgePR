@@ -5,10 +5,8 @@ import { Octokit } from "@octokit/rest";
 export async function getInstallationOctokit(
   installationId: number
 ) {
-  const privateKey = fs.readFileSync(
-    process.env.GITHUB_PRIVATE_KEY_PATH!,
-    "utf8"
-  );
+  const privateKey = process.env.GITHUB_PRIVATE_KEY!.replace(/\\n/g, "\n");
+
 
   const auth = createAppAuth({
     appId: process.env.GITHUB_APP_ID!,
